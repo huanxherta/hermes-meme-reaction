@@ -129,6 +129,13 @@ def import_libraries(cfg: MemeReactionConfig) -> MemeIndex:
                 if tags:
                     apply_metadata(item, {"tags": tags}, source="filename", overwrite=False)
 
+            # Use parent directory name as mood/tag (e.g. excitement, cry, troll)
+            parent_dir = file_path.parent if file_path.parent != root else None
+            if parent_dir is not None and parent_dir.name.lower() not in _RESERVED_NAMES:
+                dir_name = parent_dir.name
+                extra_moods = [dir_name] if dir_name else []
+                apply_metadata(item, {"tags": [dir_name], "moods": extra_moods}, source="dirname", overwrite=False)
+
             out.append(item)
 
     index = MemeIndex(items=out)
