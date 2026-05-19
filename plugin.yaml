@@ -1,0 +1,4 @@
+name: meme-reaction
+version: "0.1.0"
+description: LLM-judged automatic meme/sticker reactions for Hermes Agent gateway, via pure plugin
+kind: standalone
