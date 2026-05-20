@@ -22,6 +22,14 @@ Hermes Agent gateway 插件：LLM 判断后自动发送表情包/贴纸尾巴。
 
 ## 安装
 
+推荐优先使用 Hermes 官方插件命令安装：
+
+```bash
+hermes plugins install huanxherta/hermes-meme-reaction
+```
+
+如果你想手动控制插件目录，也可以这样安装：
+
 ```bash
 # 克隆到 Hermes 插件目录
 cd ~/.hermes/plugins
