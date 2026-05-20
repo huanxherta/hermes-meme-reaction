@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 try:
     from hermes_constants import get_hermes_home
@@ -35,6 +38,17 @@ def _as_int(value: Any, default: int, *, minimum: int = 0) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, parsed)
+
+
+def _as_theme_mode(value: Any, default: str = "light") -> str:
+    normalized = str(value or default).strip().lower()
+    if normalized in {"light", "dark"}:
+        return normalized
+    return default
+
+
+def get_hermes_config_path() -> Path:
+    return get_hermes_home() / "config.yaml"
 
 
 @dataclass(slots=True)
@@ -76,6 +90,15 @@ class MemeLlmConfig:
 
 
 @dataclass(slots=True)
+class MemeVisionConfig:
+    provider: str = ""
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    timeout_seconds: float | None = None
+
+
+@dataclass(slots=True)
 class MemeTargetsConfig:
     allowed: tuple[str, ...] = ()
     denied: tuple[str, ...] = ()
@@ -85,6 +108,29 @@ class MemeTargetsConfig:
 class MemeDebugConfig:
     file_enabled: bool = False
     path: Path = field(default_factory=lambda: get_hermes_home() / "meme_reaction" / "debug.log")
+
+
+@dataclass(slots=True)
+class MemeWebAuthConfig:
+    enabled: bool = False
+    username: str = ""
+    password: str = ""
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.username.strip() and self.password)
+
+
+@dataclass(slots=True)
+class MemeWebThemeConfig:
+    default_mode: str = "light"
+
+
+@dataclass(slots=True)
+class MemeWebConfig:
+    session_secret: str = ""
+    auth: MemeWebAuthConfig = field(default_factory=MemeWebAuthConfig)
+    theme: MemeWebThemeConfig = field(default_factory=MemeWebThemeConfig)
 
 
 @dataclass(slots=True)
@@ -105,8 +151,11 @@ class MemeReactionConfig:
     import_config: MemeImportConfig = field(default_factory=MemeImportConfig)
     selection: MemeSelectionConfig = field(default_factory=MemeSelectionConfig)
     llm: MemeLlmConfig = field(default_factory=MemeLlmConfig)
+    vision: MemeVisionConfig = field(default_factory=MemeVisionConfig)
     targets: MemeTargetsConfig = field(default_factory=MemeTargetsConfig)
     debug: MemeDebugConfig = field(default_factory=MemeDebugConfig)
+    web: MemeWebConfig = field(default_factory=MemeWebConfig)
+    root_config: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
     def debug_file_enabled(self) -> bool:
@@ -142,6 +191,35 @@ class MemeReactionConfig:
         return False
 
 
+def _load_local_yaml_config() -> dict[str, Any]:
+    config_path = get_hermes_config_path()
+    return load_root_config_file(config_path)
+
+
+def load_root_config_file(config_path: str | Path | None = None) -> dict[str, Any]:
+    path = Path(config_path).expanduser() if config_path is not None else get_hermes_config_path()
+    if not path.is_file():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            loaded = yaml.safe_load(fh) or {}
+    except Exception:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def save_root_config_file(payload: dict[str, Any], config_path: str | Path | None = None) -> Path:
+    path = Path(config_path).expanduser() if config_path is not None else get_hermes_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    if not path.is_file():
+        path.touch()
+    with tmp_path.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(payload, fh, allow_unicode=True, sort_keys=False)
+    os.replace(tmp_path, path)
+    return path
+
+
 def load_meme_reaction_config(config: dict[str, Any] | None = None) -> MemeReactionConfig:
     """Load meme_reaction config from a Hermes config dict.
 
@@ -152,7 +230,7 @@ def load_meme_reaction_config(config: dict[str, Any] | None = None) -> MemeReact
             from hermes_cli.config import load_config
             config = load_config()
         except Exception:
-            config = {}
+            config = _load_local_yaml_config()
 
     raw = (config or {}).get("meme_reaction", {})
     if not isinstance(raw, dict):
@@ -198,8 +276,12 @@ def load_meme_reaction_config(config: dict[str, Any] | None = None) -> MemeReact
 
     selection_raw = raw.get("selection", {}) if isinstance(raw.get("selection", {}), dict) else {}
     llm_raw = raw.get("llm", {}) if isinstance(raw.get("llm", {}), dict) else {}
+    vision_raw = raw.get("vision", {}) if isinstance(raw.get("vision", {}), dict) else {}
     targets_raw = raw.get("targets", {}) if isinstance(raw.get("targets", {}), dict) else {}
     debug_raw = raw.get("debug", {}) if isinstance(raw.get("debug", {}), dict) else {}
+    web_raw = raw.get("web", {}) if isinstance(raw.get("web", {}), dict) else {}
+    web_auth_raw = web_raw.get("auth", {}) if isinstance(web_raw.get("auth", {}), dict) else {}
+    web_theme_raw = web_raw.get("theme", {}) if isinstance(web_raw.get("theme", {}), dict) else {}
 
     platforms_raw = raw.get("platforms", {}) if isinstance(raw.get("platforms", {}), dict) else {}
     allowed = raw.get("allowed_platforms", platforms_raw.get("allowed", [])) or []
@@ -247,6 +329,17 @@ def load_meme_reaction_config(config: dict[str, Any] | None = None) -> MemeReact
             provider=llm_raw.get("provider"),
             model=llm_raw.get("model"),
         ),
+        vision=MemeVisionConfig(
+            provider=str(vision_raw.get("provider") or "").strip(),
+            model=str(vision_raw.get("model") or "").strip(),
+            base_url=str(vision_raw.get("base_url") or "").strip(),
+            api_key=str(vision_raw.get("api_key") or "").strip(),
+            timeout_seconds=(
+                _as_float(vision_raw.get("timeout_seconds", vision_raw.get("timeout")), 30.0, minimum=0.1, maximum=300.0)
+                if vision_raw.get("timeout_seconds", vision_raw.get("timeout")) not in {None, ""}
+                else None
+            ),
+        ),
         targets=MemeTargetsConfig(
             allowed=tuple(str(x).lower() for x in targets_raw.get("allowed", []) if str(x).strip()),
             denied=tuple(str(x).lower() for x in targets_raw.get("denied", []) if str(x).strip()),
@@ -255,4 +348,16 @@ def load_meme_reaction_config(config: dict[str, Any] | None = None) -> MemeReact
             file_enabled=bool(debug_raw.get("file_enabled", raw.get("debug_file_enabled", False))),
             path=_expand_path(debug_raw.get("path"), str(home / "meme_reaction" / "debug.log")),
         ),
+        web=MemeWebConfig(
+            session_secret=str(web_raw.get("session_secret") or "").strip(),
+            auth=MemeWebAuthConfig(
+                enabled=bool(web_auth_raw.get("enabled", False)),
+                username=str(web_auth_raw.get("username") or "").strip(),
+                password=str(web_auth_raw.get("password") or ""),
+            ),
+            theme=MemeWebThemeConfig(
+                default_mode=_as_theme_mode(web_theme_raw.get("default_mode"), "light"),
+            ),
+        ),
+        root_config=dict(config or {}) if isinstance(config, dict) else {},
     )

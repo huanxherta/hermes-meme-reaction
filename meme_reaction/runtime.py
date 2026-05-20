@@ -166,6 +166,8 @@ class MemeReactionRuntime:
                     "final_score": decision.final_score(cfg),
                     "reason": decision.reason,
                 },
+                "user_message": payload.get("user_message"),
+                "assistant_response": payload.get("assistant_response"),
             },
         )
         return None

@@ -82,6 +82,13 @@ meme_reaction:
   llm:
     enabled: true
     timeout_seconds: 30
+  web:
+    auth:
+      enabled: false
+      username: admin
+      password: change-me
+    theme:
+      default_mode: light
   libraries:
     - name: default
       path: ~/.hermes/memes
@@ -93,6 +100,8 @@ meme_reaction:
 ```
 
 空的 allow/deny 列表表示不限制。例如 `platforms.allowed: []` 允许所有平台，`targets.allowed: []` 允许所有聊天目标，`import.allowed_roots: []` 允许 `meme_import` 扫描任意可读本地路径。即使目标不限制，自动发送仍然必须匹配当前 Hermes session 的精确路由；找不到精确路由时会跳过，不会用最近聊天兜底。
+
+`meme_reaction.web.auth.enabled: true` 会给 dashboard 和素材原图接口一起加登录保护；`theme.default_mode` 只影响首次访问，之后浏览器会记住用户自己切换过的主题。
 
 ## Hermes 安全边界
 

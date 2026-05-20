@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hermes Meme Reaction Control Center</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Styling -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Background Glow Effects -->
+    <div class="bg-glow glow-1"></div>
+    <div class="bg-glow glow-2"></div>
+
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <i class="fa-solid fa-face-laugh-wink"></i>
+                </div>
+                <div class="logo-text">
+                    <h1>Hermes Meme</h1>
+                    <span>Reaction Center</span>
+                </div>
+            </div>
+
+            <nav class="nav-menu">
+                <button class="nav-item active" data-tab="dashboard">
+                    <i class="fa-solid fa-chart-pie"></i> 控制台
+                </button>
+                <button class="nav-item" data-tab="library">
+                    <i class="fa-solid fa-images"></i> 表情包库
+                </button>
+                <button class="nav-item" data-tab="history">
+                    <i class="fa-solid fa-clock-rotate-left"></i> 触发历史
+                </button>
+                <button class="nav-item" data-tab="settings">
+                    <i class="fa-solid fa-sliders"></i> 参数配置
+                </button>
+            </nav>
+
+            <button class="nav-item theme-toggle-item" id="btn-theme-toggle" style="margin-top: auto; margin-bottom: 1.5rem;">
+                <i class="fa-solid fa-sun"></i> <span>日间模式</span>
+            </button>
+
+            <div class="sidebar-footer">
+                <div class="system-status">
+                    <span class="status-indicator active" id="global-status-indicator"></span>
+                    <div class="status-details">
+                        <p class="status-label">系统状态</p>
+                        <p class="status-value" id="global-status-text">正在加载...</p>
+                    </div>
+                </div>
+                <button class="btn btn-secondary btn-block mt-4" id="btn-import-sidebar">
+                    <i class="fa-solid fa-rotate"></i> 扫描表情包库
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="top-header">
+                <div class="header-title">
+                    <h2 id="page-title">系统控制台</h2>
+                    <p id="page-subtitle">监控、配置和检索表情包自动回复状态</p>
+                </div>
+                <div class="quick-stats">
+                    <div class="stat-bubble">
+                        <span class="stat-bubble-label">已索引表情</span>
+                        <span class="stat-bubble-value" id="header-stat-memes">-</span>
+                    </div>
+                    <div class="stat-bubble">
+                        <span class="stat-bubble-label">已启用</span>
+                        <span class="stat-bubble-value" id="header-stat-active">-</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- TAB 1: Dashboard -->
+            <section id="tab-dashboard" class="tab-pane active">
+                <div class="grid grid-3">
+                    <div class="card glass status-card">
+                        <div class="card-icon gradient-violet">
+                            <i class="fa-solid fa-power-off"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3>自动发送开关</h3>
+                            <p class="card-desc">LLM 表情包决策与跨平台自动发送总控制</p>
+                            <div class="toggle-container mt-4">
+                                <span class="toggle-label" id="lbl-status-toggle">已开启</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="switch-plugin-enabled">
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card glass status-card">
+                        <div class="card-icon gradient-pink">
+                            <i class="fa-solid fa-flask"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3>调试 Dry-run 模式</h3>
+                            <p class="card-desc">跑完 LLM 决策与选图但不会在聊天平台中实际发出</p>
+                            <div class="toggle-container mt-4">
+                                <span class="toggle-label" id="lbl-dryrun-toggle">未启用</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="switch-dry-run">
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card glass status-card">
+                        <div class="card-icon gradient-blue">
+                            <i class="fa-solid fa-hourglass-half"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3>全局冷却时间</h3>
+                            <p class="card-desc">同群组或聊天频道在触发发送后的静默保护期(秒)</p>
+                            <div class="input-inline mt-4">
+                                <input type="number" id="input-cooldown" min="0" class="input-field shadow-input" placeholder="90">
+                                <span class="input-suffix">秒</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-2 mt-6">
+                    <!-- LLM Decision Boundary Visualization -->
+                    <div class="card glass slider-visualizer-card">
+                        <div class="card-header">
+                            <h3>LLM 决策门槛模型</h3>
+                            <span class="card-badge">实时判定区</span>
+                        </div>
+                        <div class="visualizer-container">
+                            <div class="gauge-bar-track">
+                                <div class="gauge-bar-active" id="bar-trigger-weight" style="width: 90%;"></div>
+                                <div class="gauge-bar-pass" id="bar-threshold" style="width: 55%;"></div>
+                                <div class="gauge-marker trigger-marker" id="marker-trigger" style="left: 90%;">
+                                    <span>触发概率: <strong id="val-trigger-weight">0.90</strong></span>
+                                </div>
+                                <div class="gauge-marker threshold-marker" id="marker-threshold" style="left: 55%;">
+                                    <span>判定阈值: <strong id="val-threshold">0.55</strong></span>
+                                </div>
+                            </div>
+                            <div class="visualizer-labels">
+                                <span>0.00 (低情绪)</span>
+                                <span>0.50 (平衡值)</span>
+                                <span>1.00 (强烈情绪)</span>
+                            </div>
+                        </div>
+                        <div class="slider-group mt-6">
+                            <div class="slider-item">
+                                <div class="slider-header">
+                                    <label for="range-trigger-weight">LLM 触发概率 (trigger_weight)</label>
+                                    <span class="slider-val" id="text-trigger-weight">0.90</span>
+                                </div>
+                                <input type="range" id="range-trigger-weight" min="0" max="1" step="0.05" value="0.90" class="range-slider">
+                                <p class="help-text">LLM 评分需高于此概率才会正式开始匹配表情包</p>
+                            </div>
+                            <div class="slider-item mt-4">
+                                <div class="slider-header">
+                                    <label for="range-threshold">相关性匹配阈值 (threshold)</label>
+                                    <span class="slider-val" id="text-threshold">0.55</span>
+                                </div>
+                                <input type="range" id="range-threshold" min="0" max="1" step="0.05" value="0.55" class="range-slider">
+                                <p class="help-text">表情包和当前聊天情绪的向量匹配相似度最低要求</p>
+                            </div>
+                        </div>
+                        <div class="card-actions mt-4 text-right">
+                            <button class="btn btn-primary" id="btn-save-dashboard-cfg">
+                                <i class="fa-solid fa-circle-check"></i> 保存决策配置
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Fast Actions / Shortcuts -->
+                    <div class="card glass">
+                        <div class="card-header">
+                            <h3>快速操作与配置信息</h3>
+                        </div>
+                        <div class="quick-links">
+                            <div class="info-row">
+                                <span class="info-label">表情索引路径</span>
+                                <span class="info-value path-text" id="info-index-path">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">会话路由持久化</span>
+                                <span class="info-value path-text" id="info-routes-path">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">发送日志路径</span>
+                                <span class="info-value path-text" id="info-history-path">-</span>
+                            </div>
+                        </div>
+                        <div class="quick-action-btns mt-6">
+                            <button class="btn btn-secondary btn-lg" id="btn-run-import-dashboard">
+                                <i class="fa-solid fa-arrows-spin"></i> 立即全量扫描导入
+                            </button>
+                            <button class="btn btn-secondary btn-lg" id="btn-nav-library">
+                                <i class="fa-solid fa-magnifying-glass"></i> 查看已索引表情包
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 2: Meme Library -->
+            <section id="tab-library" class="tab-pane">
+                <div class="filter-bar glass">
+                    <div class="search-box">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" id="search-library-input" placeholder="输入名称、内容标签、情绪标签等关键词搜索...">
+                    </div>
+                    <div class="filter-controls">
+                        <div class="select-wrapper">
+                            <select id="filter-library-select">
+                                <option value="">所有表情库</option>
+                            </select>
+                        </div>
+                        <div class="select-wrapper">
+                            <select id="filter-status-select">
+                                <option value="">所有状态</option>
+                                <option value="true">已启用</option>
+                                <option value="false">已禁用</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-secondary" id="btn-clear-filters">
+                            <i class="fa-solid fa-filter-circle-xmark"></i> 清空
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Meme Grid -->
+                <div class="meme-grid-container mt-6">
+                    <div class="meme-grid" id="meme-grid-element">
+                        <!-- Dynamic content -->
+                    </div>
+                    
+                    <!-- Empty State -->
+                    <div class="empty-state hidden" id="meme-empty-state">
+                        <i class="fa-regular fa-face-frown-open"></i>
+                        <h4>未找到表情包</h4>
+                        <p>请尝试更改检索条件，或者执行重新扫描以同步文件夹。</p>
+                        <button class="btn btn-primary mt-4" id="btn-empty-import">
+                            <i class="fa-solid fa-rotate"></i> 扫描库文件夹
+                        </button>
+                    </div>
+
+                    <!-- Loading State -->
+                    <div class="loading-state hidden" id="meme-loading-state">
+                        <div class="spinner"></div>
+                        <p>正在拉取表情包信息，请稍候...</p>
+                    </div>
+                </div>
+
+                <!-- Pagination -->
+                <div class="pagination-container mt-6" id="pagination-element">
+                    <button class="btn-page" id="btn-prev-page"><i class="fa-solid fa-chevron-left"></i></button>
+                    <div class="page-numbers" id="page-numbers-container">
+                        <!-- Dynamic page list -->
+                    </div>
+                    <button class="btn-page" id="btn-next-page"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </section>
+
+            <!-- TAB 3: History Logs -->
+            <section id="tab-history" class="tab-pane">
+                <div class="card glass history-container">
+                    <div class="card-header justify-between">
+                        <h3>触发匹配与发送流水记录</h3>
+                        <div class="actions">
+                            <button class="btn btn-secondary" id="btn-refresh-history">
+                                <i class="fa-solid fa-arrows-rotate"></i> 刷新日志
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="history-table-wrapper mt-4">
+                        <table class="history-table">
+                            <thead>
+                                <tr>
+                                    <th>触发时间</th>
+                                    <th>表情缩略图</th>
+                                    <th>接收目标 (Target)</th>
+                                    <th>LLM 情绪评分</th>
+                                    <th>决策结论</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-tbody">
+                                <!-- Dynamic history log rows -->
+                            </tbody>
+                        </table>
+
+                        <div class="empty-state hidden" id="history-empty-state">
+                            <i class="fa-solid fa-receipt"></i>
+                            <h4>暂无触发记录</h4>
+                            <p>在有聊天数据流入且 LLM 开始做出表情包匹配决策后，日志会实时出现在这里。</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 4: Settings Config -->
+            <section id="tab-settings" class="tab-pane">
+                <div class="settings-grid">
+                    <!-- Column 1: Core Configuration -->
+                    <div class="settings-column">
+                        <div class="card glass">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-square-sliders"></i> 表情库匹配算法 (Selection)</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label>单次选图候选集数量 (top_k)</label>
+                                    <input type="number" id="set-select-topk" min="1" max="50" class="input-field" placeholder="8">
+                                    <p class="help-text">LLM 评分筛选后的前 K 个表情包候选，参与最终距离匹配</p>
+                                </div>
+                                <div class="form-group mt-4">
+                                    <label>近期发送惩罚权重 (repeat_penalty)</label>
+                                    <input type="number" id="set-select-penalty" min="0" max="1" step="0.1" class="input-field" placeholder="0.8">
+                                    <p class="help-text">避免在短时间内高频发送同一张或同标签表情，系数越低惩罚越大</p>
+                                </div>
+                                <div class="form-group mt-4">
+                                    <label>同标签最多连续发送次数 (max_same_tag_recent)</label>
+                                    <input type="number" id="set-select-maxrecent" min="1" class="input-field" placeholder="3">
+                                    <p class="help-text">同一标签表情在近几次决策中最大允许发送张数</p>
+                                </div>
+                                <div class="form-group mt-4">
+                                    <label>允许发送的表情格式</label>
+                                    <div class="checkbox-group mt-2">
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="set-allow-gif" checked>
+                                            <span>动态表情 (GIF)</span>
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="set-allow-webp" checked>
+                                            <span>WebP 贴纸</span>
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="set-allow-static" checked>
+                                            <span>静态图片 (PNG/JPG)</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card glass mt-6">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-robot"></i> Gateway 复用大模型 (LLM)</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label class="checkbox-item font-semibold mb-2">
+                                        <input type="checkbox" id="set-llm-enabled" checked>
+                                        <span>启用大语言模型决策</span>
+                                    </label>
+                                    <p class="help-text">关闭后将失去智能情绪匹配，无法自动反应表情包</p>
+                                </div>
+                                <div class="form-group mt-4">
+                                    <label>LLM 调用超时时间 (秒)</label>
+                                    <input type="number" id="set-llm-timeout" min="1" max="120" class="input-field" placeholder="4">
+                                    <p class="help-text">防挂死。超时后直接退出本次决策，不阻塞主回复通道</p>
+                                </div>
+                                <div class="form-group mt-4">
+                                    <label>服务提供商 (Provider - 可留空)</label>
+                                    <input type="text" id="set-llm-provider" class="input-field" placeholder="默认复用 Gateway">
+                                    <p class="help-text">留空则自动复用 Hermes 宿主自身的 Provider 设置，无需填 Key</p>
+                                </div>
+                                <div class="form-group mt-4">
+                                    <label>判定模型名称 (Model - 可留空)</label>
+                                    <input type="text" id="set-llm-model" class="input-field" placeholder="默认复用 Gateway 模型">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Column 2: Platform and Filters -->
+                    <div class="settings-column">
+                        <div class="card glass">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-network-wired"></i> 平台与通道过滤 (Filter)</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label>允许激活的聊天平台 (Platforms Allowed)</label>
+                                    <div class="chips-editor" id="editor-platforms-allow">
+                                        <div class="chips-list"></div>
+                                        <input type="text" placeholder="输入并回车添加平台 (如 qq, telegram, discord)...">
+                                    </div>
+                                    <p class="help-text">留空代表允许所有平台</p>
+                                </div>
+
+                                <div class="form-group mt-4">
+                                    <label>排除禁用的聊天平台 (Platforms Denied)</label>
+                                    <div class="chips-editor" id="editor-platforms-deny">
+                                        <div class="chips-list"></div>
+                                        <input type="text" placeholder="输入并回车添加平台...">
+                                    </div>
+                                </div>
+
+                                <div class="form-group mt-4">
+                                    <label>允许的聊天目标 ID/群号 (Targets Allowed)</label>
+                                    <div class="chips-editor" id="editor-targets-allow">
+                                        <div class="chips-list"></div>
+                                        <input type="text" placeholder="输入并回车添加目标...">
+                                    </div>
+                                    <p class="help-text">精确匹配 chat_id / group_id。留空代表不限制</p>
+                                </div>
+
+                                <div class="form-group mt-4">
+                                    <label>禁用的聊天目标 ID/群号 (Targets Denied)</label>
+                                    <div class="chips-editor" id="editor-targets-deny">
+                                        <div class="chips-list"></div>
+                                        <input type="text" placeholder="输入并回车添加目标...">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Configured Folders / Libraries -->
+                        <div class="card glass mt-6">
+                            <div class="card-header justify-between">
+                                <h3><i class="fa-solid fa-folder-open"></i> 表情库目录列表 (Libraries)</h3>
+                                <button class="btn btn-secondary btn-sm" id="btn-add-library-row">
+                                    <i class="fa-solid fa-plus"></i> 添加目录
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div class="library-rows" id="library-settings-rows">
+                                    <!-- Dynamic rows from script -->
+                                </div>
+                                <p class="help-text mt-2"><i class="fa-solid fa-circle-info"></i> 网关本地扫描路径，可使用波浪号代表家目录，如 `~/.hermes/memes`。</p>
+                            </div>
+                        </div>
+
+                        <!-- Footer Actions -->
+                        <div class="card glass mt-6 p-4 border-accent text-right">
+                            <button class="btn btn-secondary mr-2" id="btn-reset-settings">
+                                <i class="fa-solid fa-rotate-left"></i> 重置修改
+                            </button>
+                            <button class="btn btn-primary" id="btn-save-all-settings">
+                                <i class="fa-solid fa-floppy-disk"></i> 保存所有配置
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- MODAL 1: Meme Metadata Detail Editor -->
+    <div class="modal-overlay hidden" id="meme-editor-modal">
+        <div class="modal glass slide-up">
+            <div class="modal-header">
+                <h3>编辑表情包元数据</h3>
+                <button class="btn-close-modal" id="btn-close-meme-modal">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body editor-modal-body">
+                <div class="editor-layout">
+                    <div class="editor-preview-column">
+                        <div class="img-preview-box">
+                            <img src="" alt="Meme Preview" id="modal-meme-img">
+                        </div>
+                        <div class="info-box-sm mt-4">
+                            <p class="file-path-text" id="modal-meme-path">-</p>
+                            <div class="flex justify-between mt-2 text-xs opacity-60">
+                                <span id="modal-meme-size">- KB</span>
+                                <span id="modal-meme-library">-</span>
+                            </div>
+                        </div>
+                        <div class="toggle-container justify-between mt-4 p-2 bg-dark-50 rounded">
+                            <span class="font-semibold text-sm">启用该表情包</span>
+                            <label class="switch switch-sm">
+                                <input type="checkbox" id="modal-meme-enabled">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="editor-fields-column">
+                        <div class="form-group">
+                            <label>画面描述 / Caption</label>
+                            <input type="text" id="modal-meme-caption" class="input-field" placeholder="画面中有什么，例如：一只微笑着的柴犬...">
+                        </div>
+
+                        <div class="form-group mt-4">
+                            <label>内容标签 / Tags（用于搜索和匹配）</label>
+                            <div class="chips-editor" id="modal-meme-tags-editor">
+                                <div class="chips-list"></div>
+                                <input type="text" placeholder="输入词组回车添加...">
+                            </div>
+                        </div>
+
+                        <div class="form-group mt-4">
+                            <label>情绪标签 / Moods（例如：开心, 嘲讽, 大哭）</label>
+                            <div class="chips-editor" id="modal-meme-moods-editor">
+                                <div class="chips-list"></div>
+                                <input type="text" placeholder="输入词组回车添加...">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-2 mt-4">
+                            <div class="form-group">
+                                <label>适用场景 / Safe for</label>
+                                <div class="chips-editor" id="modal-meme-safefor-editor">
+                                    <div class="chips-list"></div>
+                                    <input type="text" placeholder="场景回车...">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>规避场景 / Avoid for</label>
+                                <div class="chips-editor" id="modal-meme-avoidfor-editor">
+                                    <div class="chips-list"></div>
+                                    <input type="text" placeholder="场景回车...">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group mt-4">
+                            <div class="flex justify-between">
+                                <label>情绪激烈程度 (Intensity)</label>
+                                <span class="intensity-val font-semibold text-accent" id="modal-meme-intensity-text">0.5</span>
+                            </div>
+                            <input type="range" id="modal-meme-intensity" min="0" max="1" step="0.05" class="range-slider">
+                            <div class="flex justify-between text-xs opacity-50 mt-1">
+                                <span>轻微 / 平静</span>
+                                <span>极其强烈 / 夸张</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-cancel-meme-modal">取消</button>
+                <button class="btn btn-primary" id="btn-save-meme-modal">保存元数据修改</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 2: History Conversation Chat Detail -->
+    <div class="modal-overlay hidden" id="history-detail-modal">
+        <div class="modal glass slide-up modal-md">
+            <div class="modal-header">
+                <h3>触发详情与决策对话上下文</h3>
+                <button class="btn-close-modal" id="btn-close-history-modal">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="chat-details-panel">
+                    <div class="detail-section">
+                        <h4 class="section-title">大模型判断过程</h4>
+                        <div class="decision-reason-box glass mt-2" id="history-detail-reason">
+                            <!-- Decision reason text -->
+                        </div>
+                    </div>
+
+                    <div class="detail-section mt-4">
+                        <h4 class="section-title">原始对话上下文 (Conversation Context)</h4>
+                        <div class="chat-messages-container mt-2" id="history-detail-chat">
+                            <!-- Conversational chat logs -->
+                        </div>
+                    </div>
+
+                    <div class="detail-section mt-4">
+                        <h4 class="section-title">最终匹配并发送表情</h4>
+                        <div class="sent-meme-preview-box mt-2">
+                            <div class="img-preview-box sm">
+                                <img src="" alt="Sent Meme" id="history-detail-meme-img">
+                            </div>
+                            <div class="sent-meme-details">
+                                <p class="meme-name font-semibold" id="history-detail-meme-name">-</p>
+                                <div class="tags-group mt-1" id="history-detail-meme-tags">
+                                    <!-- Meme tags -->
+                                </div>
+                                <p class="meme-path mt-2 path-text" id="history-detail-meme-path">-</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary btn-block" id="btn-close-history-detail">已阅</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Application Script -->
+    <script src="app.js"></script>
+</body>
+</html>

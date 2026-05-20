@@ -77,3 +77,35 @@ def test_runtime_defaults_are_safe_and_file_debug_is_off():
     assert cfg.enabled is False
     assert cfg.dry_run is False
     assert cfg.debug_file_enabled is False
+
+
+def test_config_parses_plugin_vision_overrides(tmp_path):
+    cfg = load_meme_reaction_config({
+        "model": {
+            "default": "host-model",
+            "provider": "host-provider",
+            "base_url": "http://host/v1",
+            "api_key": "host-key",
+        },
+        "auxiliary": {
+            "vision": {
+                "provider": "aux-provider",
+                "model": "aux-model",
+                "base_url": "http://aux/v1",
+                "api_key": "aux-key",
+            }
+        },
+        "meme_reaction": {
+            "libraries": [{"name": "x", "path": str(tmp_path), "recursive": False}],
+            "vision": {
+                "provider": "plugin-provider",
+                "model": "plugin-model",
+                "base_url": "http://plugin/v1",
+                "api_key": "plugin-key",
+            },
+        },
+    })
+    assert cfg.vision.provider == "plugin-provider"
+    assert cfg.vision.model == "plugin-model"
+    assert cfg.vision.base_url == "http://plugin/v1"
+    assert cfg.vision.api_key == "plugin-key"

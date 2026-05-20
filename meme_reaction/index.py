@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from .config import MemeReactionConfig
+
 
 INDEX_VERSION = 1
 
@@ -105,6 +107,35 @@ class MemeIndex:
         return [item for item in self.items if item.enabled and item.exists()]
 
 
+@dataclass(slots=True, frozen=True)
+class DeleteMemeResult:
+    success: bool
+    error: str = ""
+
+
+def delete_meme_item(cfg: MemeReactionConfig, item_id: str) -> DeleteMemeResult:
+    index = MemeIndex.load(cfg.index_path)
+    item = next((entry for entry in index.items if entry.id == str(item_id)), None)
+    if item is None:
+        return DeleteMemeResult(success=False, error="item_not_found")
+
+    file_path = Path(item.path).expanduser()
+    resolved_path = file_path.resolve(strict=False)
+    allowed_roots = [library.path.expanduser().resolve() for library in cfg.libraries]
+    if not any(_path_within_root(resolved_path, root) for root in allowed_roots):
+        return DeleteMemeResult(success=False, error="item_path_not_in_library")
+
+    try:
+        file_path.unlink(missing_ok=True)
+        file_path.with_suffix(".json").unlink(missing_ok=True)
+    except OSError as exc:
+        return DeleteMemeResult(success=False, error=str(exc) or "delete_failed")
+
+    index.items = [entry for entry in index.items if entry.id != item.id]
+    index.save(cfg.index_path)
+    return DeleteMemeResult(success=True)
+
+
 def file_sha256(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as fh:
@@ -114,6 +145,14 @@ def file_sha256(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
                 break
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _path_within_root(candidate: Path, root: Path) -> bool:
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 def stat_item(path: str | Path, *, library: str = "default", root: str | Path | None = None) -> MemeItem:
