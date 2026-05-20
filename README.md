@@ -1,64 +1,54 @@
 # hermes-meme-reaction
 
-Hermes Agent gateway 插件：LLM 判断后自动发送表情包/贴纸尾巴。
+Hermes Agent gateway 插件：在助手回复完成后，按对话语气和上下文自动补一张表情包 / 贴纸尾巴。
 
-## 工作原理
+## 它现在能做什么
 
-1. **`pre_gateway_dispatch`** — 缓存当前精确路由（session_id + platform + chat_id + thread_id）到插件状态文件，跨重启持久化
-2. **`post_llm_call`** — 助手回复完成后，只固定 route 和对话快照，然后投递后台任务，避免阻塞主回复链路
-3. 后台任务用 `ctx.llm`（零配置，复用 gateway 自身 LLM）判断是否需要发送表情包
-4. LLM 返回决策（是否发送、情绪、标签）→ 从索引中选取最匹配的表情包 → 通过 `ctx.dispatch_tool("send_message")` 跨平台发送
+- 复用 Hermes 宿主自己的 `ctx.llm`，判断这轮回复要不要发图
+- 只走当前 Hermes session 对应的精确路由，不猜“最近一个聊天”
+- 在后台线程里跑判定和发送，不阻塞主回复
+- 扫描本地表情库，按标签 / 情绪 / 强度选图
+- 提供 NiceGUI Web 面板，支持：
+  - 控制开关、阈值、LLM 超时等运行设置
+  - 浏览、搜索、编辑、启用/禁用正式表情库
+  - 删除正式表情素材（删原图、删同名 sidecar、退索引）
+  - 上传图片 / GIF 到待导入区
+  - 自动跑视觉识别，人工确认后再正式入库
+  - Web 登录保护与主题记忆
 
-## 特性
+## 工作链路
 
-- ✅ **零额外配置** — LLM 调用通过 `ctx.llm` 复用 gateway 的 provider/model/auth，不需要自己的 API key
-- ✅ **全平台** — 通过 Hermes 统一 `send_message` 工具发送，支持 QQ、Telegram、Discord 等所有已连接平台
-- ✅ **精确路由** — 只在匹配到当前 Hermes session 路由时发送，找不到就跳过，不猜最近聊天
-- ✅ **路由持久化** — 缓存到 `~/.hermes/meme_reaction/routes.json`，网关重启后不丢失
-- ✅ **冷却机制** — 同一群/频道内避免短时间内连续发送
-- ✅ **LLM 决策** — 不是随机发图，而是根据对话情绪、语境精准匹配
-- ✅ **后台执行** — LLM 决策和发送在后台线程里执行，不拖慢主回复
-- ✅ **dry-run** — 可完整跑决策和选图但不实际发送，便于调试
+1. `pre_gateway_dispatch`
+   记录当前精确路由：`session_id + platform + chat_id + thread_id`
+2. `post_llm_call`
+   只保存当前 route 和对话快照，然后把表情判定任务丢进后台
+3. 后台任务
+   用 `ctx.llm` 做结构化判定，得到“发不发 / 想要什么情绪和标签”
+4. 选图并发送
+   从索引里挑最匹配的素材，通过 Hermes `send_message` 发出
 
 ## 安装
 
-推荐优先使用 Hermes 官方插件命令安装：
+推荐优先使用 Hermes 官方插件安装方式：
 
 ```bash
 hermes plugins install huanxherta/hermes-meme-reaction
-```
-
-如果你想手动控制插件目录，也可以这样安装：
-
-```bash
-# 克隆到 Hermes 插件目录
-cd ~/.hermes/plugins
-git clone https://github.com/huanxherta/hermes-meme-reaction.git meme-reaction
-
-# 启用插件
 hermes plugins enable meme-reaction
-
-# 重启网关让插件生效
 hermes gateway restart
 ```
 
-## 导入表情包
+如果你想手动控制目录：
 
-在对话中使用 `meme_import` 工具：
-
-```
-meme_import(path="/path/to/sticker/folder", recursive=true)
-```
-
-或用 `meme_search` 搜索已索引的表情包：
-
-```
-meme_search(query="happy", tags=["庆祝", "开心"])
+```bash
+cd ~/.hermes/plugins
+git clone https://github.com/huanxherta/hermes-meme-reaction.git meme-reaction
+hermes plugins enable meme-reaction
+hermes gateway restart
 ```
 
-## 配置
+## 快速开始
 
-在 `~/.hermes/config.yaml` 中：
+先在 `~/.hermes/config.yaml` 里启用插件并指向你的表情库：
 
 ```yaml
 plugins:
@@ -71,70 +61,210 @@ meme_reaction:
   trigger_weight: 0.9
   threshold: 0.55
   cooldown_seconds: 90
-  platforms:
-    allowed: []
-    denied: []
-  targets:
-    allowed: []
-    denied: []
-  debug:
-    file_enabled: false
   llm:
     enabled: true
     timeout_seconds: 30
+  libraries:
+    - name: default
+      path: ~/.hermes/memes
+      recursive: true
+      enabled: true
+```
+
+然后导入现有表情库：
+
+```text
+meme_import(path="/path/to/memes", recursive=true)
+```
+
+或搜索已索引素材：
+
+```text
+meme_search(query="happy", tags=["庆祝", "开心"])
+```
+
+## Web 面板
+
+启动：
+
+```bash
+python start_dashboard.py --host 127.0.0.1 --port 8000
+```
+
+面板主要有 5 页：
+
+- `控制台`：插件即时状态和关键旋钮
+- `表情库`：搜索、编辑、启用/禁用、删除正式素材
+- `上传入库`：上传图片 / GIF，自动识别，手动确认入库
+- `历史`：查看触发和发送记录
+- `设置`：选图参数、视觉识别、Web 登录保护、表情库目录
+
+### 上传入库怎么工作
+
+1. 文件先进入插件自己的待导入工作区
+2. 后台自动跑视觉识别
+3. 面板展示识别结果：`caption / tags / moods / safe_for / avoid_for / intensity`
+4. 你手动点“导入”或“导入选中”，才会真正进入正式表情库
+
+说明：
+
+- 动画 `GIF / WebP` 做视觉识别时只取第一帧送模型
+- 正式入库时保留原文件，不会改成静态图
+- 待导入项可以删；正式表情库里的素材也可以删
+
+## 完整配置
+
+```yaml
+plugins:
+  enabled:
+    - meme-reaction
+
+meme_reaction:
+  enabled: true
+  dry_run: false
+  trigger_weight: 0.9
+  threshold: 0.55
+  cooldown_seconds: 90
+
+  platforms:
+    allowed: []
+    denied: []
+
+  targets:
+    allowed: []
+    denied: []
+
+  debug:
+    file_enabled: false
+
+  llm:
+    enabled: true
+    timeout_seconds: 30
+
+  vision:
+    provider: ""
+    model: ""
+    base_url: ""
+    api_key: ""
+    timeout_seconds: 30
+
   web:
+    session_secret: ""
     auth:
       enabled: false
       username: admin
       password: change-me
     theme:
       default_mode: light
+
   libraries:
     - name: default
       path: ~/.hermes/memes
       recursive: true
       enabled: true
+
   import:
     allowed_roots: []
     use_vision: false
 ```
 
-空的 allow/deny 列表表示不限制。例如 `platforms.allowed: []` 允许所有平台，`targets.allowed: []` 允许所有聊天目标，`import.allowed_roots: []` 允许 `meme_import` 扫描任意可读本地路径。即使目标不限制，自动发送仍然必须匹配当前 Hermes session 的精确路由；找不到精确路由时会跳过，不会用最近聊天兜底。
+## 配置说明
 
-`meme_reaction.web.auth.enabled: true` 会给 dashboard 和素材原图接口一起加登录保护；`theme.default_mode` 只影响首次访问，之后浏览器会记住用户自己切换过的主题。
+### 平台 / 目标过滤
 
-## Hermes 安全边界
+- `platforms.allowed: []` 表示不限制平台
+- `targets.allowed: []` 表示不限制聊天目标
+- 即使目标不限制，自动发送也仍然必须命中当前 Hermes session 的精确 route
 
-这个仓库不修改 Hermes 本体代码。插件只通过 Hermes 插件 API 注册 hooks/tools，并把插件自己的运行状态写到 `~/.hermes/meme_reaction/`。
+### `import.allowed_roots`
 
-运行 `hermes plugins enable meme-reaction` 会修改 Hermes 用户配置用于启用插件；本插件代码不会写 `~/.hermes/hermes-agent/**`。
+空列表表示不限制。
 
-## 文件结构
+如果配置了，它现在会同时限制：
 
+- `meme_import` 手动导入
+- Web 面板里保存表情库目录
+- Web 面板上传入库时选择的目标表情库
+- 正式入库落盘
+
+也就是说，Web 不再能绕过这个边界。
+
+### Web 鉴权
+
+```yaml
+meme_reaction:
+  web:
+    auth:
+      enabled: true
+      username: admin
+      password: your-password
 ```
+
+开启后，以下入口都会一起受保护：
+
+- `/`
+- 表情原图接口
+- 待导入素材原图接口
+
+`theme.default_mode` 只影响首次访问；之后浏览器会记住用户自己切换过的主题。
+
+### 视觉识别配置继承
+
+Web 上传识别用的是插件自己的视觉链路，不走 `ctx.llm`。
+
+当前继承规则是：
+
+1. 优先读 `meme_reaction.vision.*`
+2. 留空时回退 Hermes 的 `auxiliary.vision.*`
+3. 其中：
+   - `model` 只回退到 `auxiliary.vision.model`
+   - `api_key` 会回退到 `auxiliary.vision.api_key`，再回退 `model.api_key`
+   - `base_url` 会回退到 `auxiliary.vision.base_url`，再回退 `model.base_url`
+   - `provider` 会回退到 `auxiliary.vision.provider`，再回退 `model.provider`
+4. 视觉模型仍然为空时，识别任务会直接报错，不会偷偷猜模型名
+
+## 安全边界
+
+这个仓库不修改 Hermes 本体代码。
+
+插件只会：
+
+- 通过 Hermes 插件 API 注册 hooks / tools
+- 把自己的状态写到 `~/.hermes/meme_reaction/`
+- 在需要时更新 Hermes 用户配置 `config.yaml`
+
+它不会写：
+
+- `~/.hermes/hermes-agent/**`
+
+## 仓库结构
+
+```text
 hermes-meme-reaction/
 ├── meme_reaction/
-│   ├── __init__.py       # 包入口：导出 register
-│   ├── config.py         # 配置加载与数据类
-│   ├── decision.py       # ctx.llm 结构化决策
-│   ├── importer.py       # 表情包文件夹扫描 + Vision 标注
-│   ├── index.py          # 索引结构 + 查询
-│   ├── plugin.py         # Hermes register(ctx)
-│   ├── prompts.py        # LLM 决策 prompt + JSON schema
-│   ├── routes.py         # 路由模型与精确查找
-│   ├── runtime.py        # hooks 编排
-│   ├── sender.py         # dry-run / send_message 发送
-│   ├── state.py          # 插件状态文件
-│   ├── tools.py          # meme_import / meme_search
-│   └── selector.py       # 基于决策选取最匹配的表情包
+│   ├── config.py
+│   ├── decision.py
+│   ├── importer.py
+│   ├── index.py
+│   ├── plugin.py
+│   ├── prompts.py
+│   ├── routes.py
+│   ├── runtime.py
+│   ├── selector.py
+│   ├── sender.py
+│   ├── state.py
+│   ├── tools.py
+│   ├── vision.py
+│   └── web/
 ├── tests/
-├── plugin.yaml           # 插件清单
+├── start_dashboard.py
+├── plugin.yaml
 └── README.md
 ```
 
 ## 致谢
 
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent) — 插件系统、gateway、ctx.llm
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent)
 
 ## License
 
