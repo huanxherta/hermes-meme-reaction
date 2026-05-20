@@ -1,6 +1,6 @@
-from gateway.meme_reaction.config import load_meme_reaction_config
-from gateway.meme_reaction.index import MemeIndex, MemeItem
-from gateway.meme_reaction.selector import MemeDecision, select_meme
+from meme_reaction.config import load_meme_reaction_config
+from meme_reaction.index import MemeIndex, MemeItem
+from meme_reaction.selector import MemeDecision, select_meme
 
 
 def test_decision_weight_threshold():

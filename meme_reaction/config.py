@@ -6,7 +6,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hermes_constants import get_hermes_home
+try:
+    from hermes_constants import get_hermes_home
+except ModuleNotFoundError:
+    def get_hermes_home() -> Path:
+        return Path.home() / ".hermes"
 
 
 SUPPORTED_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif")
@@ -50,6 +54,7 @@ class MemeImportConfig:
     vision_batch_size: int = 1
     overwrite_existing_tags: bool = False
     supported_exts: tuple[str, ...] = SUPPORTED_IMAGE_EXTS
+    allowed_roots: tuple[Path, ...] = ()
 
 
 @dataclass(slots=True)
@@ -71,20 +76,41 @@ class MemeLlmConfig:
 
 
 @dataclass(slots=True)
+class MemeTargetsConfig:
+    allowed: tuple[str, ...] = ()
+    denied: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class MemeDebugConfig:
+    file_enabled: bool = False
+    path: Path = field(default_factory=lambda: get_hermes_home() / "meme_reaction" / "debug.log")
+
+
+@dataclass(slots=True)
 class MemeReactionConfig:
     enabled: bool = False
     trigger_weight: float = 0.9
     threshold: float = 0.55
     cooldown_seconds: int = 90
+    dry_run: bool = False
     allowed_platforms: tuple[str, ...] = ()
     denied_platforms: tuple[str, ...] = ()
     libraries: tuple[MemeLibraryConfig, ...] = field(default_factory=tuple)
     index_path: Path = field(default_factory=lambda: get_hermes_home() / "meme_reaction" / "index.json")
     cache_dir: Path = field(default_factory=lambda: get_hermes_home() / "meme_reaction" / "cache")
     history_path: Path = field(default_factory=lambda: get_hermes_home() / "meme_reaction" / "history.jsonl")
+    routes_path: Path = field(default_factory=lambda: get_hermes_home() / "meme_reaction" / "routes.json")
+    last_sent_path: Path = field(default_factory=lambda: get_hermes_home() / "meme_reaction" / "last_sent.json")
     import_config: MemeImportConfig = field(default_factory=MemeImportConfig)
     selection: MemeSelectionConfig = field(default_factory=MemeSelectionConfig)
     llm: MemeLlmConfig = field(default_factory=MemeLlmConfig)
+    targets: MemeTargetsConfig = field(default_factory=MemeTargetsConfig)
+    debug: MemeDebugConfig = field(default_factory=MemeDebugConfig)
+
+    @property
+    def debug_file_enabled(self) -> bool:
+        return self.debug.file_enabled
 
     def platform_allowed(self, platform: Any) -> bool:
         name = getattr(platform, "value", platform)
@@ -92,6 +118,28 @@ class MemeReactionConfig:
         if self.allowed_platforms and normalized not in self.allowed_platforms:
             return False
         return normalized not in self.denied_platforms
+
+    def target_allowed(self, target: Any) -> bool:
+        normalized = str(target or "").lower()
+        if not normalized:
+            return False
+        if normalized in self.targets.denied:
+            return False
+        if self.targets.allowed and normalized not in self.targets.allowed:
+            return False
+        return True
+
+    def import_path_allowed(self, path: str | Path) -> bool:
+        if not self.import_config.allowed_roots:
+            return True
+        candidate = Path(path).expanduser().resolve()
+        for root in self.import_config.allowed_roots:
+            try:
+                candidate.relative_to(root.expanduser().resolve())
+                return True
+            except ValueError:
+                continue
+        return False
 
 
 def load_meme_reaction_config(config: dict[str, Any] | None = None) -> MemeReactionConfig:
@@ -132,6 +180,14 @@ def load_meme_reaction_config(config: dict[str, Any] | None = None) -> MemeReact
         libraries.append(MemeLibraryConfig(name="default", path=home / "memes"))
 
     import_raw = raw.get("import", {}) if isinstance(raw.get("import", {}), dict) else {}
+    allowed_roots_raw = import_raw.get("allowed_roots") or []
+    if not isinstance(allowed_roots_raw, (list, tuple)):
+        allowed_roots_raw = []
+    allowed_roots = tuple(
+        _expand_path(str(root), str(home / "memes"))
+        for root in allowed_roots_raw
+        if str(root).strip()
+    )
     supported_exts = import_raw.get("supported_exts") or SUPPORTED_IMAGE_EXTS
     if not isinstance(supported_exts, (list, tuple)):
         supported_exts = SUPPORTED_IMAGE_EXTS
@@ -142,9 +198,12 @@ def load_meme_reaction_config(config: dict[str, Any] | None = None) -> MemeReact
 
     selection_raw = raw.get("selection", {}) if isinstance(raw.get("selection", {}), dict) else {}
     llm_raw = raw.get("llm", {}) if isinstance(raw.get("llm", {}), dict) else {}
+    targets_raw = raw.get("targets", {}) if isinstance(raw.get("targets", {}), dict) else {}
+    debug_raw = raw.get("debug", {}) if isinstance(raw.get("debug", {}), dict) else {}
 
-    allowed = raw.get("allowed_platforms") or []
-    denied = raw.get("denied_platforms") or []
+    platforms_raw = raw.get("platforms", {}) if isinstance(raw.get("platforms", {}), dict) else {}
+    allowed = raw.get("allowed_platforms", platforms_raw.get("allowed", [])) or []
+    denied = raw.get("denied_platforms", platforms_raw.get("denied", [])) or []
     if not isinstance(allowed, (list, tuple)):
         allowed = []
     if not isinstance(denied, (list, tuple)):
@@ -155,12 +214,15 @@ def load_meme_reaction_config(config: dict[str, Any] | None = None) -> MemeReact
         trigger_weight=_as_float(raw.get("trigger_weight", raw.get("probability", 0.9)), 0.9),
         threshold=_as_float(raw.get("threshold", 0.55), 0.55),
         cooldown_seconds=_as_int(raw.get("cooldown_seconds", 90), 90),
+        dry_run=bool(raw.get("dry_run", False)),
         allowed_platforms=tuple(str(x).lower() for x in allowed),
         denied_platforms=tuple(str(x).lower() for x in denied),
         libraries=tuple(libraries),
         index_path=_expand_path(raw.get("index_path"), str(home / "meme_reaction" / "index.json")),
         cache_dir=_expand_path(raw.get("cache_dir"), str(home / "meme_reaction" / "cache")),
         history_path=_expand_path(raw.get("history_path"), str(home / "meme_reaction" / "history.jsonl")),
+        routes_path=_expand_path(raw.get("routes_path"), str(home / "meme_reaction" / "routes.json")),
+        last_sent_path=_expand_path(raw.get("last_sent_path"), str(home / "meme_reaction" / "last_sent.json")),
         import_config=MemeImportConfig(
             use_existing_index=bool(import_raw.get("use_existing_index", True)),
             use_sidecar_json=bool(import_raw.get("use_sidecar_json", True)),
@@ -169,6 +231,7 @@ def load_meme_reaction_config(config: dict[str, Any] | None = None) -> MemeReact
             vision_batch_size=_as_int(import_raw.get("vision_batch_size", 1), 1, minimum=1),
             overwrite_existing_tags=bool(import_raw.get("overwrite_existing_tags", False)),
             supported_exts=normalized_exts,
+            allowed_roots=allowed_roots,
         ),
         selection=MemeSelectionConfig(
             top_k=_as_int(selection_raw.get("top_k", 8), 8, minimum=1),
@@ -183,5 +246,13 @@ def load_meme_reaction_config(config: dict[str, Any] | None = None) -> MemeReact
             timeout_seconds=float(llm_raw.get("timeout_seconds", 4) or 4),
             provider=llm_raw.get("provider"),
             model=llm_raw.get("model"),
+        ),
+        targets=MemeTargetsConfig(
+            allowed=tuple(str(x).lower() for x in targets_raw.get("allowed", []) if str(x).strip()),
+            denied=tuple(str(x).lower() for x in targets_raw.get("denied", []) if str(x).strip()),
+        ),
+        debug=MemeDebugConfig(
+            file_enabled=bool(debug_raw.get("file_enabled", raw.get("debug_file_enabled", False))),
+            path=_expand_path(debug_raw.get("path"), str(home / "meme_reaction" / "debug.log")),
         ),
     )

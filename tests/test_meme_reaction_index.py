@@ -1,6 +1,6 @@
-from gateway.meme_reaction.config import load_meme_reaction_config
-from gateway.meme_reaction.importer import import_libraries, infer_tags_from_filename
-from gateway.meme_reaction.index import MemeIndex
+from meme_reaction.config import load_meme_reaction_config
+from meme_reaction.importer import import_libraries, infer_tags_from_filename
+from meme_reaction.index import MemeIndex
 
 
 def test_infer_tags_from_filename():

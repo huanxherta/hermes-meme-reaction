@@ -1,9 +1,12 @@
 import importlib.util
 import json
+from pathlib import Path
 import sys
 import types
 from types import SimpleNamespace
 from unittest.mock import Mock
+
+from meme_reaction.importer import import_libraries
 
 
 def load_plugin():
@@ -14,15 +17,16 @@ def load_plugin():
         sys.modules[parent] = pkg
     module_name = "hermes_plugins.meme_reaction_test"
     sys.modules.pop(module_name, None)
+    plugin_dir = Path(__file__).resolve().parents[1]
     spec = importlib.util.spec_from_file_location(
         module_name,
-        "plugins/meme-reaction/__init__.py",
-        submodule_search_locations=["plugins/meme-reaction"],
+        plugin_dir / "__init__.py",
+        submodule_search_locations=[str(plugin_dir)],
     )
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     mod.__package__ = module_name
-    mod.__path__ = ["plugins/meme-reaction"]
+    mod.__path__ = [str(plugin_dir)]
     sys.modules[module_name] = mod
     spec.loader.exec_module(mod)
     return mod
@@ -69,29 +73,34 @@ def test_plugin_registers_hooks_and_tools():
 
 def test_plugin_captures_route_and_sends_media(tmp_path, monkeypatch):
     mod = load_plugin()
-    ctx = FakeCtx()
-    mod.register(ctx)
+    impl = sys.modules[mod.register.__module__]
 
     meme = tmp_path / "吐槽_猫猫.webp"
     meme.write_bytes(b"x")
     index_path = tmp_path / "index.json"
     history_path = tmp_path / "history.jsonl"
+    routes_path = tmp_path / "routes.json"
+    last_sent_path = tmp_path / "last_sent.json"
 
-    cfg = mod.load_meme_reaction_config({
+    cfg = impl.load_meme_reaction_config({
         "meme_reaction": {
             "enabled": True,
             "trigger_weight": 1,
             "threshold": 0.1,
             "cooldown_seconds": 0,
+            "routes_path": str(routes_path),
+            "last_sent_path": str(last_sent_path),
             "index_path": str(index_path),
             "history_path": str(history_path),
             "libraries": [{"name": "t", "path": str(tmp_path), "recursive": False}],
             "import": {"use_vision": False},
         }
     })
-    mod.import_libraries(cfg)
-    monkeypatch.setattr(mod, "load_meme_reaction_config", lambda: cfg)
+    import_libraries(cfg)
+    monkeypatch.setattr(impl, "load_meme_reaction_config", lambda: cfg)
 
+    ctx = FakeCtx()
+    mod.register(ctx)
     source = SimpleNamespace(platform="telegram", chat_id="-100", thread_id="42", user_id="u", user_name="U")
     event = SimpleNamespace(source=source, text="继续")
     entry = SimpleNamespace(session_id="sid", session_key="sk")
@@ -109,3 +118,86 @@ def test_plugin_captures_route_and_sends_media(tmp_path, monkeypatch):
     assert ctx.sent[0][0] == "send_message"
     assert ctx.sent[0][1]["target"] == "telegram:-100:42"
     assert ctx.sent[0][1]["message"].startswith("MEDIA:")
+    assert routes_path.exists()
+    assert last_sent_path.exists()
+
+
+def test_post_llm_call_without_exact_session_route_does_not_send(tmp_path, monkeypatch):
+    mod = load_plugin()
+    impl = sys.modules[mod.register.__module__]
+
+    meme = tmp_path / "吐槽_猫猫.webp"
+    meme.write_bytes(b"x")
+    cfg = impl.load_meme_reaction_config({
+        "meme_reaction": {
+            "enabled": True,
+            "trigger_weight": 1,
+            "threshold": 0.1,
+            "cooldown_seconds": 0,
+            "routes_path": str(tmp_path / "routes.json"),
+            "last_sent_path": str(tmp_path / "last_sent.json"),
+            "index_path": str(tmp_path / "index.json"),
+            "history_path": str(tmp_path / "history.jsonl"),
+            "libraries": [{"name": "t", "path": str(tmp_path), "recursive": False}],
+            "import": {"use_vision": False},
+        }
+    })
+    import_libraries(cfg)
+    monkeypatch.setattr(impl, "load_meme_reaction_config", lambda: cfg)
+
+    ctx = FakeCtx()
+    mod.register(ctx)
+    ctx.hooks["post_llm_call"](
+        session_id="missing",
+        user_message="继续",
+        assistant_response="完成啦",
+        conversation_history=[],
+        platform="telegram",
+    )
+
+    assert ctx.sent == []
+
+
+def test_dry_run_records_history_without_dispatch(tmp_path, monkeypatch):
+    mod = load_plugin()
+    impl = sys.modules[mod.register.__module__]
+
+    meme = tmp_path / "吐槽_猫猫.webp"
+    meme.write_bytes(b"x")
+    history_path = tmp_path / "history.jsonl"
+    cfg = impl.load_meme_reaction_config({
+        "meme_reaction": {
+            "enabled": True,
+            "dry_run": True,
+            "trigger_weight": 1,
+            "threshold": 0.1,
+            "cooldown_seconds": 0,
+            "routes_path": str(tmp_path / "routes.json"),
+            "last_sent_path": str(tmp_path / "last_sent.json"),
+            "index_path": str(tmp_path / "index.json"),
+            "history_path": str(history_path),
+            "libraries": [{"name": "t", "path": str(tmp_path), "recursive": False}],
+            "import": {"use_vision": False},
+        }
+    })
+    import_libraries(cfg)
+    monkeypatch.setattr(impl, "load_meme_reaction_config", lambda: cfg)
+
+    ctx = FakeCtx()
+    mod.register(ctx)
+    source = SimpleNamespace(platform="telegram", chat_id="-100", thread_id="42", user_id="u", user_name="U")
+    event = SimpleNamespace(source=source, text="继续")
+    entry = SimpleNamespace(session_id="sid", session_key="sk")
+    store = SimpleNamespace(get_or_create_session=Mock(return_value=entry))
+
+    ctx.hooks["pre_gateway_dispatch"](event=event, session_store=store)
+    ctx.hooks["post_llm_call"](
+        session_id="sid",
+        user_message="继续",
+        assistant_response="完成啦",
+        conversation_history=[],
+        platform="telegram",
+    )
+
+    assert ctx.sent == []
+    assert '"dry_run": true' in history_path.read_text(encoding="utf-8")

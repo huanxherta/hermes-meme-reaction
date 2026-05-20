@@ -4,7 +4,7 @@ Hermes Agent gateway 插件：LLM 判断后自动发送表情包/贴纸尾巴。
 
 ## 工作原理
 
-1. **`pre_gateway_dispatch`** — 缓存当前路由（platform + chat_id + thread_id）到文件，跨重启持久化
+1. **`pre_gateway_dispatch`** — 缓存当前精确路由（session_id + platform + chat_id + thread_id）到插件状态文件，跨重启持久化
 2. **`post_llm_call`** — 助手回复完成后，用 `ctx.llm`（零配置，复用 gateway 自身 LLM）判断是否需要发送表情包
 3. LLM 返回决策（是否发送、情绪、标签）→ 从索引中选取最匹配的表情包 → 通过 `ctx.dispatch_tool("send_message")` 跨平台发送
 
@@ -12,9 +12,11 @@ Hermes Agent gateway 插件：LLM 判断后自动发送表情包/贴纸尾巴。
 
 - ✅ **零额外配置** — LLM 调用通过 `ctx.llm` 复用 gateway 的 provider/model/auth，不需要自己的 API key
 - ✅ **全平台** — 通过 Hermes 统一 `send_message` 工具发送，支持 QQ、Telegram、Discord 等所有已连接平台
+- ✅ **精确路由** — 只在匹配到当前 Hermes session 路由时发送，找不到就跳过，不猜最近聊天
 - ✅ **路由持久化** — 缓存到 `~/.hermes/meme_reaction/routes.json`，网关重启后不丢失
 - ✅ **冷却机制** — 同一群/频道内避免短时间内连续发送
 - ✅ **LLM 决策** — 不是随机发图，而是根据对话情绪、语境精准匹配
+- ✅ **dry-run** — 可完整跑决策和选图但不实际发送，便于调试
 
 ## 安装
 
@@ -55,9 +57,18 @@ plugins:
 
 meme_reaction:
   enabled: true
+  dry_run: false
   trigger_weight: 0.9
   threshold: 0.55
   cooldown_seconds: 90
+  platforms:
+    allowed: []
+    denied: []
+  targets:
+    allowed: []
+    denied: []
+  debug:
+    file_enabled: false
   llm:
     enabled: true
     timeout_seconds: 30
@@ -66,21 +77,37 @@ meme_reaction:
       path: ~/.hermes/memes
       recursive: true
       enabled: true
-  platforms:
-    allowed: ["qqonebot", "telegram", "discord"]
+  import:
+    allowed_roots: []
+    use_vision: false
 ```
+
+空的 allow/deny 列表表示不限制。例如 `platforms.allowed: []` 允许所有平台，`targets.allowed: []` 允许所有聊天目标，`import.allowed_roots: []` 允许 `meme_import` 扫描任意可读本地路径。即使目标不限制，自动发送仍然必须匹配当前 Hermes session 的精确路由；找不到精确路由时会跳过，不会用最近聊天兜底。
+
+## Hermes 安全边界
+
+这个仓库不修改 Hermes 本体代码。插件只通过 Hermes 插件 API 注册 hooks/tools，并把插件自己的运行状态写到 `~/.hermes/meme_reaction/`。
+
+运行 `hermes plugins enable meme-reaction` 会修改 Hermes 用户配置用于启用插件；本插件代码不会写 `~/.hermes/hermes-agent/**`。
 
 ## 文件结构
 
 ```
 hermes-meme-reaction/
 ├── meme_reaction/
-│   ├── __init__.py       # 主入口：hooks + 发送逻辑
+│   ├── __init__.py       # 包入口：导出 register
 │   ├── config.py         # 配置加载与数据类
+│   ├── decision.py       # ctx.llm 结构化决策
 │   ├── importer.py       # 表情包文件夹扫描 + Vision 标注
 │   ├── index.py          # 索引结构 + 查询
+│   ├── plugin.py         # Hermes register(ctx)
 │   ├── prompts.py        # LLM 决策 prompt + JSON schema
-│   └ selector.py         # 基于决策选取最匹配的表情包
+│   ├── routes.py         # 路由模型与精确查找
+│   ├── runtime.py        # hooks 编排
+│   ├── sender.py         # dry-run / send_message 发送
+│   ├── state.py          # 插件状态文件
+│   ├── tools.py          # meme_import / meme_search
+│   └── selector.py       # 基于决策选取最匹配的表情包
 ├── tests/
 ├── plugin.yaml           # 插件清单
 └── README.md
