@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import time
 import types
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -61,6 +62,26 @@ class FakeCtx:
         })
 
 
+class SlowCtx(FakeCtx):
+    def __init__(self):
+        super().__init__()
+        self.decision_calls = 0
+
+    def complete_structured(self, **kwargs):
+        self.decision_calls += 1
+        time.sleep(0.2)
+        return super().complete_structured(**kwargs)
+
+
+def wait_until(predicate, timeout=1.0):
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
 def test_plugin_registers_hooks_and_tools():
     mod = load_plugin()
     ctx = FakeCtx()
@@ -114,12 +135,12 @@ def test_plugin_captures_route_and_sends_media(tmp_path, monkeypatch):
         conversation_history=[],
         platform="telegram",
     )
-    assert ctx.sent
+    assert wait_until(lambda: bool(ctx.sent))
     assert ctx.sent[0][0] == "send_message"
     assert ctx.sent[0][1]["target"] == "telegram:-100:42"
     assert ctx.sent[0][1]["message"].startswith("MEDIA:")
     assert routes_path.exists()
-    assert last_sent_path.exists()
+    assert wait_until(lambda: last_sent_path.exists())
 
 
 def test_post_llm_call_without_exact_session_route_does_not_send(tmp_path, monkeypatch):
@@ -200,4 +221,94 @@ def test_dry_run_records_history_without_dispatch(tmp_path, monkeypatch):
     )
 
     assert ctx.sent == []
+    assert wait_until(lambda: history_path.exists())
     assert '"dry_run": true' in history_path.read_text(encoding="utf-8")
+
+
+def test_post_llm_call_returns_before_slow_decision_finishes(tmp_path, monkeypatch):
+    mod = load_plugin()
+    impl = sys.modules[mod.register.__module__]
+
+    meme = tmp_path / "吐槽_猫猫.webp"
+    meme.write_bytes(b"x")
+    cfg = impl.load_meme_reaction_config({
+        "meme_reaction": {
+            "enabled": True,
+            "trigger_weight": 1,
+            "threshold": 0.1,
+            "cooldown_seconds": 0,
+            "routes_path": str(tmp_path / "routes.json"),
+            "last_sent_path": str(tmp_path / "last_sent.json"),
+            "index_path": str(tmp_path / "index.json"),
+            "history_path": str(tmp_path / "history.jsonl"),
+            "libraries": [{"name": "t", "path": str(tmp_path), "recursive": False}],
+            "import": {"use_vision": False},
+        }
+    })
+    import_libraries(cfg)
+    monkeypatch.setattr(impl, "load_meme_reaction_config", lambda: cfg)
+
+    ctx = SlowCtx()
+    mod.register(ctx)
+    source = SimpleNamespace(platform="telegram", chat_id="-100", thread_id="42", user_id="u", user_name="U")
+    event = SimpleNamespace(source=source, text="继续")
+    entry = SimpleNamespace(session_id="sid", session_key="sk")
+    store = SimpleNamespace(get_or_create_session=Mock(return_value=entry))
+
+    ctx.hooks["pre_gateway_dispatch"](event=event, session_store=store)
+    started = time.perf_counter()
+    ctx.hooks["post_llm_call"](
+        session_id="sid",
+        user_message="继续",
+        assistant_response="完成啦",
+        conversation_history=[],
+        platform="telegram",
+    )
+
+    assert time.perf_counter() - started < 0.1
+    assert wait_until(lambda: bool(ctx.sent))
+
+
+def test_post_llm_call_does_not_queue_duplicate_pending_reactions(tmp_path, monkeypatch):
+    mod = load_plugin()
+    impl = sys.modules[mod.register.__module__]
+
+    meme = tmp_path / "吐槽_猫猫.webp"
+    meme.write_bytes(b"x")
+    cfg = impl.load_meme_reaction_config({
+        "meme_reaction": {
+            "enabled": True,
+            "trigger_weight": 1,
+            "threshold": 0.1,
+            "cooldown_seconds": 0,
+            "routes_path": str(tmp_path / "routes.json"),
+            "last_sent_path": str(tmp_path / "last_sent.json"),
+            "index_path": str(tmp_path / "index.json"),
+            "history_path": str(tmp_path / "history.jsonl"),
+            "libraries": [{"name": "t", "path": str(tmp_path), "recursive": False}],
+            "import": {"use_vision": False},
+        }
+    })
+    import_libraries(cfg)
+    monkeypatch.setattr(impl, "load_meme_reaction_config", lambda: cfg)
+
+    ctx = SlowCtx()
+    mod.register(ctx)
+    source = SimpleNamespace(platform="telegram", chat_id="-100", thread_id="42", user_id="u", user_name="U")
+    event = SimpleNamespace(source=source, text="继续")
+    entry = SimpleNamespace(session_id="sid", session_key="sk")
+    store = SimpleNamespace(get_or_create_session=Mock(return_value=entry))
+
+    ctx.hooks["pre_gateway_dispatch"](event=event, session_store=store)
+    for _ in range(3):
+        ctx.hooks["post_llm_call"](
+            session_id="sid",
+            user_message="继续",
+            assistant_response="完成啦",
+            conversation_history=[],
+            platform="telegram",
+        )
+
+    assert wait_until(lambda: bool(ctx.sent))
+    assert len(ctx.sent) == 1
+    assert ctx.decision_calls == 1

@@ -5,8 +5,9 @@ Hermes Agent gateway 插件：LLM 判断后自动发送表情包/贴纸尾巴。
 ## 工作原理
 
 1. **`pre_gateway_dispatch`** — 缓存当前精确路由（session_id + platform + chat_id + thread_id）到插件状态文件，跨重启持久化
-2. **`post_llm_call`** — 助手回复完成后，用 `ctx.llm`（零配置，复用 gateway 自身 LLM）判断是否需要发送表情包
-3. LLM 返回决策（是否发送、情绪、标签）→ 从索引中选取最匹配的表情包 → 通过 `ctx.dispatch_tool("send_message")` 跨平台发送
+2. **`post_llm_call`** — 助手回复完成后，只固定 route 和对话快照，然后投递后台任务，避免阻塞主回复链路
+3. 后台任务用 `ctx.llm`（零配置，复用 gateway 自身 LLM）判断是否需要发送表情包
+4. LLM 返回决策（是否发送、情绪、标签）→ 从索引中选取最匹配的表情包 → 通过 `ctx.dispatch_tool("send_message")` 跨平台发送
 
 ## 特性
 
@@ -16,6 +17,7 @@ Hermes Agent gateway 插件：LLM 判断后自动发送表情包/贴纸尾巴。
 - ✅ **路由持久化** — 缓存到 `~/.hermes/meme_reaction/routes.json`，网关重启后不丢失
 - ✅ **冷却机制** — 同一群/频道内避免短时间内连续发送
 - ✅ **LLM 决策** — 不是随机发图，而是根据对话情绪、语境精准匹配
+- ✅ **后台执行** — LLM 决策和发送在后台线程里执行，不拖慢主回复
 - ✅ **dry-run** — 可完整跑决策和选图但不实际发送，便于调试
 
 ## 安装

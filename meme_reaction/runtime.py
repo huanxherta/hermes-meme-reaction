@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import time
+from threading import Lock
 from typing import Any, Callable
 
 from .config import MemeReactionConfig, load_meme_reaction_config
@@ -19,9 +21,20 @@ logger = logging.getLogger(__name__)
 
 
 class MemeReactionRuntime:
-    def __init__(self, ctx: Any, config_loader: Callable[[], MemeReactionConfig] = load_meme_reaction_config):
+    def __init__(
+        self,
+        ctx: Any,
+        config_loader: Callable[[], MemeReactionConfig] = load_meme_reaction_config,
+        executor: ThreadPoolExecutor | None = None,
+    ):
         self.ctx = ctx
         self.config_loader = config_loader
+        self.executor = executor or ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="meme-reaction",
+        )
+        self._pending_lock = Lock()
+        self._pending_reactions: set[str] = set()
 
     def on_pre_gateway_dispatch(self, **kwargs: Any):
         event = kwargs.get("event")
@@ -74,6 +87,42 @@ class MemeReactionRuntime:
         if cfg.cooldown_seconds and now - last_sent.get(route_key, 0) < cfg.cooldown_seconds:
             return None
 
+        payload = {
+            "user_message": kwargs.get("user_message"),
+            "assistant_response": str(kwargs.get("assistant_response") or ""),
+            "conversation_history": list(kwargs.get("conversation_history") or []),
+        }
+        with self._pending_lock:
+            if route_key in self._pending_reactions:
+                return None
+            self._pending_reactions.add(route_key)
+        self.executor.submit(self._run_reaction_task, cfg, route, route_key, now, payload)
+        return None
+
+    def _run_reaction_task(
+        self,
+        cfg: MemeReactionConfig,
+        route: Any,
+        route_key: str,
+        started_at: float,
+        payload: dict[str, Any],
+    ) -> None:
+        try:
+            self._run_reaction_task_inner(cfg, route, route_key, started_at, payload)
+        except Exception:
+            logger.debug("meme-reaction background task failed", exc_info=True)
+        finally:
+            with self._pending_lock:
+                self._pending_reactions.discard(route_key)
+
+    def _run_reaction_task_inner(
+        self,
+        cfg: MemeReactionConfig,
+        route: Any,
+        route_key: str,
+        started_at: float,
+        payload: dict[str, Any],
+    ) -> None:
         index = MemeIndex.load(cfg.index_path)
         if not index.items:
             return None
@@ -81,9 +130,9 @@ class MemeReactionRuntime:
         decision = decide_with_llm(
             self.ctx,
             cfg,
-            user_message=kwargs.get("user_message"),
-            assistant_response=str(kwargs.get("assistant_response") or ""),
-            history=kwargs.get("conversation_history") or [],
+            user_message=payload.get("user_message"),
+            assistant_response=str(payload.get("assistant_response") or ""),
+            history=payload.get("conversation_history") or [],
         )
         if decision is None or not decision.passes(cfg):
             return None
@@ -98,13 +147,14 @@ class MemeReactionRuntime:
             return None
 
         if not result.dry_run:
-            last_sent[route_key] = now
-            JsonState(cfg.last_sent_path).save_dict(last_sent)
+            current_last_sent = load_float_map(cfg.last_sent_path)
+            current_last_sent[route_key] = started_at
+            JsonState(cfg.last_sent_path).save_dict(current_last_sent)
 
         append_jsonl(
             cfg.history_path,
             {
-                "ts": now,
+                "ts": started_at,
                 "id": item.id,
                 "path": item.path,
                 "tags": item.tags,
